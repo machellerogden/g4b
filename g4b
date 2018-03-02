@@ -425,7 +425,6 @@ g4b_expect_output_to_match() {
     else
         msg="when \`${cmd[0]}\` is called\n       then output should match \`$expected_output\`"
     fi
-
     cmd_output=$(${cmd[@]})
 
     if $(echo "$cmd_output" | grep -q -e "$expected_output"); then
@@ -453,6 +452,24 @@ g4b_expect_output_to_match() {
     fi
 
     g4b_print_result "$msg"
+}
+
+g4b_stub() {
+    local subject_cmd_name="$1"
+    while (( "$#" )); do shift; done
+    if [ "$(type -t "${subject_cmd_name}")" == "function" ]; then
+        eval "$(echo "g4b_bkup_${subject_cmd_name}()" && declare -f "${subject_cmd_name}" | tail -n +2)"
+        unset -f "${subject_cmd_name}"
+    fi
+}
+
+g4b_restore(){
+    local subject_cmd_name="$1"
+    while (( "$#" )); do shift; done
+    if [ "$(type -t "g4b_bkup_${subject_cmd_name}")" == "function" ]; then
+        eval "$(echo "${subject_cmd_name}()" && declare -f "g4b_bkup_${subject_cmd_name}" | tail -n +2)"
+        unset -f "g4b_bkup_${subject_cmd_name}"
+    fi
 }
 
 g4b_create_spy() {
@@ -541,10 +558,7 @@ g4b_expect_to_have_been_called() {
     subject_code=$?
 
     # backup original subject, if function
-    if [ "$(type -t "${subject_cmd_name}")" == "function" ]; then
-        eval "$(echo "g4b_bkup_${subject_cmd_name}()" && declare -f "${subject_cmd_name}" | tail -n +2)"
-        unset -f "${subject_cmd_name}"
-    fi
+    g4b_stub "${subject_cmd_name}"
 
     # replace with spy
     IFS=$'\n' tmp_files=( $(g4b_create_spy "$subject_cmd_name" "$subject_output" "$subject_code") )
@@ -573,11 +587,7 @@ g4b_expect_to_have_been_called() {
     fi
     unalias exit
 
-    # restore original subject, if function
-    if [ "$(type -t "g4b_bkup_${subject_cmd_name}")" == "function" ]; then
-        eval "$(echo "${subject_cmd_name}()" && declare -f "g4b_bkup_${subject_cmd_name}" | tail -n +2)"
-        unset -f "g4b_bkup_${subject_cmd_name}"
-    fi
+    g4b_restore "${subject_cmd_name}"
 
     g4b_actual_call_count="$(cat "$tmp_calls")"
     g4b_actual_call_count="${g4b_actual_call_count:-0}"
