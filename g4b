@@ -246,6 +246,12 @@ thenn() {
         if [ "$1 $2" == "exit with" ]; then
             g4b_expect_to_exit_with $3
 
+        elif [ "$2 $3" == "should equal" ]; then
+            g4b_expect_to_equal 0 "$1" "$4"
+
+        elif [ "$2 $3 $4" == "should not equal" ]; then
+            g4b_expect_to_equal 0 "$1" "$5"
+
         elif [ "$2 $3 $4" == "should be called" ]; then
             cmd=( $1 )
             if [ $# -gt 5 ]; then
@@ -301,15 +307,70 @@ thenn() {
     fi
 }
 
+g4b_expect_to_equal() {
+    local actual_name
+    local actual
+    local expected
+    local cmd
+    local msg
+
+    invert="$1"
+    actual_name="$2"
+    expected="$3"
+
+    while (( "$#" )); do shift; done
+
+    IFS=% cmd=( "${g4b_when[@]}" )
+
+    if [ ${#cmd[@]} -gt 1 ]; then
+        msg="when \`${cmd[0]}\` is called with $(printf "\`%s\` " "${cmd[@]:1}")\n       then \`$actual_name\` should equal \`$expected\`"
+    else
+        msg="when \`${cmd[0]}\` is called\n       then \`$actual_name\` should equal \`$expected\`"
+    fi
+
+    exit() {
+        :
+    }
+
+    "${cmd[@]}" > /dev/null 2>&1
+    actual="${!actual_name}"
+
+    unset -f exit
+
+    if [ -n "$G4B_DEBUG" ]; then
+        echo "expected: $expected"
+        echo "actual: $actual"
+    fi
+
+    if [ "$invert" -eq 1 ]; then
+        if [ "$actual" != "$expected" ]; then
+           g4b_pass=1
+        else
+           g4b_pass=0
+        fi
+        invert_text=" not"
+    else
+        if [ "$actual" = "$expected" ]; then
+           g4b_pass=1
+        else
+           g4b_pass=0
+        fi
+    fi
+
+    if [ "$g4b_pass" -eq 0 ]; then
+        msg+="\n       expected \`$actual_name\`${invert_text} to equal \`$expected\`. actual was \`$actual\`"
+    fi
+
+    g4b_print_result "$msg"
+}
+
 g4b_expect_to_exit_with() {
     local code
     local cmd
     local msg
-    local trapped
     local actual
 
     code="$1"
-    trapped=0
 
     while (( "$#" )); do shift; done
 
