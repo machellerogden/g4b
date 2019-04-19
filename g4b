@@ -14,6 +14,7 @@ G4B_PASS_COUNT=0
 G4B_FAIL_COUNT=0
 G4B_PATH_BKUP="$PATH"
 G4B_RESERVED_WORDS='g4b_|G4B_|section\s?\(|feature\s?\(|ffeature\s?\(|xfeature\s?\(|scenario\s?\(|given\s?\(|teardown\s?\(|when\s?\(|thenn\s?\(|load_src\s?\(|load_specs\s?\('
+G4B_STUBBED_BUILTINS=()
 
 g4b_specific_call_count=0
 g4b_expected_call_count=1
@@ -427,7 +428,7 @@ g4b_expect_output_to_match() {
     fi
     cmd_output=$(${cmd[@]})
 
-    if $(echo "$cmd_output" | grep -q -e "$expected_output"); then
+    if $(echo -ne "$cmd_output" | tr '\n' '\a' | grep -q -e "$(echo -ne "$expected_output" | tr '\n' '\a')"); then
         g4b_pass=1
     else
         g4b_pass=0
@@ -460,15 +461,24 @@ g4b_stub() {
     if [ "$(type -t "${subject_cmd_name}")" == "function" ]; then
         eval "$(echo "g4b_bkup_${subject_cmd_name}()" && declare -f "${subject_cmd_name}" | tail -n +2)"
         unset -f "${subject_cmd_name}"
+    elif [ "$(type -t "${subject_cmd_name}")" == "builtin" ]; then
+        eval "${subject_cmd_name}()(:)"
+        # export -f "$subject_cmd_name"
+        G4B_STUBBED_BUILTINS+=( "$subject_cmd_name" )
     fi
 }
 
 g4b_restore(){
     local subject_cmd_name="$1"
+    local delete
     while (( "$#" )); do shift; done
     if [ "$(type -t "g4b_bkup_${subject_cmd_name}")" == "function" ]; then
         eval "$(echo "${subject_cmd_name}()" && declare -f "g4b_bkup_${subject_cmd_name}" | tail -n +2)"
         unset -f "g4b_bkup_${subject_cmd_name}"
+    elif [[ " ${G4B_STUBBED_BUILTINS[@]} " =~ " $subject_cmd_name " ]]; then
+        unset -f "${subject_cmd_name}"
+        delete=( "${subject_cmd_name}" )
+        G4B_STUBBED_BUILTINS=( "${G4B_STUBBED_BUILTINS[@]/$delete}" )
     fi
 }
 
@@ -484,18 +494,18 @@ g4b_create_spy() {
     local tmp_calls=$(mktemp 2>/dev/null || mktemp -t tmp)
 
     echo "call_count=\$(cat \"$tmp_calls\" 2>/dev/null || echo 0)
-        (( call_count++ ))
-        echo \$call_count >| \"$tmp_calls\"
-        IFS_bkup=\$IFS
-        IFS=$'\n'
-        for arg in \"\$@\"; do
-            echo \$arg >> \"${tmp_args}-\${call_count}\"
-        done
-        IFS=\$IFS_bkup
-        cat <<'EOD'
+(( call_count++ ))
+echo \$call_count >| \"$tmp_calls\"
+IFS_bkup=\$IFS
+IFS=$'\n'
+for arg in \"\$@\"; do
+    echo \$arg >> \"${tmp_args}-\${call_count}\"
+done
+IFS=\$IFS_bkup
+cat <<'EOD'
 $output
 EOD
-        exit \"${code}\"" > "${tmp_dir}/${name}"
+exit \"${code}\"" > "${tmp_dir}/${name}"
 
     chmod +x "${tmp_dir}/${name}"
 
@@ -531,6 +541,7 @@ g4b_expect_to_have_been_called() {
 
     if [ -n "${subject[*]:1}" ]; then
         expected_args_text="$(cat "$g4b_expected_args_tmp" | while read line; do printf "\`%b\` " "$line"; done)"
+        expected_args_text="$(echo -ne $expected_args_text | sed -e 's/[[:space:]]*$//')"
     fi
 
     msg="when \`${condition_cmd_name}\` is called"
@@ -555,6 +566,7 @@ g4b_expect_to_have_been_called() {
 
     # capture output and exit status
     subject_output=$("${subject[@]}" 2>&1)
+    # subject_output=$("${subject[@]}" 2>&1 0<&-)
     subject_code=$?
 
     # backup original subject, if function
